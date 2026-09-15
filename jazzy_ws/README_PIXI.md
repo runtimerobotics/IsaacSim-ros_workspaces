@@ -53,6 +53,98 @@ with `pixi run <command>` without entering the shell.
 > `install/setup.(bash/bat)` on environment activation. This means all your built packages
 > are available without any manual sourcing.
 
+## Start the H1 full-body controller (native ROS + venv)
+
+`h1_fullbody_controller` is intentionally documented separately from the Pixi workflow
+above. It loads a TorchScript H1 locomotion policy and is built in a local virtual
+environment so that PyTorch does not modify the system ROS Python installation.
+
+### 1. Set up and build only the H1 controller
+
+From this `jazzy_ws` directory, run:
+
+```bash
+./setup_h1_controller_venv.sh --install-system-deps
+```
+
+This command prompts for `sudo` and installs the ROS Jazzy packages used by the Isaac Sim
+ROS installation guide. It then creates `.venv-h1-native`, installs PyTorch, builds only
+`h1_fullbody_controller`, and verifies that `policy/h1_policy.pt` can be loaded.
+
+For a CPU-only machine, use the CPU PyTorch wheel instead:
+
+```bash
+TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu \
+  ./setup_h1_controller_venv.sh --install-system-deps
+```
+
+### 2. Start Isaac Sim and confirm its ROS 2 data first
+
+Start the prepared H1 Isaac Sim stage in a separate terminal. The stage must publish one
+advancing `/clock` stream plus `/imu` and `/joint_states` for the H1 articulation. Use the
+same ROS domain in Isaac Sim and the controller; this example uses domain `0`.
+
+In a second terminal, verify the simulator before starting the controller:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_DOMAIN_ID=0
+
+ros2 topic info /clock
+ros2 topic echo --once /clock
+ros2 topic echo --once /imu
+ros2 topic echo --once /joint_states
+```
+
+Do not continue if `/clock` is missing, frozen, or if either sensor topic has no messages.
+The controller only computes actions after it receives timestamp-matched IMU and joint-state
+messages.
+
+### 3. Start the controller
+
+Open another terminal and run:
+
+```bash
+cd /path/to/IsaacSim-ros_workspaces/jazzy_ws
+source /opt/ros/jazzy/setup.bash
+source .venv-h1-native/bin/activate
+source install/setup.bash
+export ROS_DOMAIN_ID=0
+
+ros2 launch h1_fullbody_controller h1_fullbody_controller.launch.xml
+```
+
+Use the launch command rather than `ros2 run`: the launch file provides the installed,
+absolute path to the policy file.
+
+### 4. Verify commands before teleoperation
+
+With the simulator playing and the controller running, verify the command output in a new
+terminal:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source .venv-h1-native/bin/activate
+source install/setup.bash
+export ROS_DOMAIN_ID=0
+
+ros2 topic info /joint_command
+ros2 topic echo --once /joint_command
+ros2 topic hz /joint_command
+```
+
+Expect one `/joint_command` publisher and messages with advancing, nonzero timestamps.
+Keep `/cmd_vel` at zero until those checks pass and the robot is safely standing. Only then,
+if your simulator safety setup is ready, start teleoperation in another terminal:
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+Press `k` to stop. This controller is for the Isaac Sim H1 stage; do not connect its output
+directly to physical-robot motion hardware without an independently reviewed safety and
+hardware-control integration.
+
 
 ### 5. Start the Isaac Sim
 
